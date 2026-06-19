@@ -26,14 +26,14 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
-// ---------------------------------------------------------------------
-// ----------------Database  Collection --------------------------------
-// ---------------------------------------------------------------------
+    // ---------------------------------------------------------------------
+    // ----------------Database  Collection --------------------------------
+    // ---------------------------------------------------------------------
     const database = client.db('online-ticket-booking-platform');
     const ticketsCollection = database.collection('tickets');
 
 
-// --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
     app.get('/api/tickets', async (req, res) => {
       const cursor = ticketsCollection.find();
@@ -41,32 +41,51 @@ async function run() {
       res.send(result);
     });
 
-// ----------------------POST-TICKET-(VENDOR ONLY)----------------------
+    // ----------------------POST-TICKET-(VENDOR ONLY)----------------------
     app.post('/api/tickets', async (req, res) => {
       const newTicket = req.body;
       const result = await ticketsCollection.insertOne(newTicket);
       res.send(result);
     });
 
-// ----------------------GET VENDOR ADDED TICKETS--------------------------
-  app.get('/api/tickets/vendor/:userId', async (req, res) => {
-    const userId = req.params.userId;
-    const cursor = ticketsCollection.find({ vendorId: userId }).sort({_id: -1});
-    const result = await cursor.toArray();
-    res.send(result);
-  })
+    // ----------------------GET VENDOR ADDED TICKETS--------------------------
+    app.get('/api/tickets/vendor/:userId', async (req, res) => {
+      const userId = req.params.userId;
+      const cursor = ticketsCollection.find({ vendorId: userId }).sort({ _id: -1 });
+      const result = await cursor.toArray();
+      res.send(result);
+    })
 
 
-// ----------------------DELETE VENDOR ADDED TICKETS--------------------------
- app.delete('/api/tickets/vendor/:id', async (req, res) => {
-  const id = req.params.id;
-  const query = { _id: new ObjectId(id) };
-  const result = await ticketsCollection.deleteOne(query);
-  res.send(result);
- })
 
+    // ----------------------DELETE VENDOR ADDED TICKETS--------------------------
+    app.delete('/api/tickets/vendor/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await ticketsCollection.deleteOne(query);
+      res.send(result);
+    })
 
-// ------------------------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
+    // ----------------------Update VENDOR ADDED TICKETS------------------------
+    app.patch('/api/tickets/vendor/:id', async (req, res) => {
+      const result = await ticketsCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: req.body }
+      );
+      res.send(result);
+    })
+
+    // ----------------------Get Admin all Tickets------------------------
+
+    app.get('/api/tickets/admin/all', async (req, res) => {
+      const result = await ticketsCollection
+        .find()
+        .sort({ verificationStatus: 1, createdAt: -1 }) // pending আগে দেখাবে
+        .toArray();
+      res.send(result);
+    })
+
+    // ------------------------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
 
 
     // Send a ping to confirm a successful connection
