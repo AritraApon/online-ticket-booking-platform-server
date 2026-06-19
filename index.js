@@ -1,10 +1,10 @@
 const express = require('express');
 const cors = require('cors');
+const { ObjectId } = require('mongodb');
 const app = express()
 require('dotenv').config();
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const port = process.env.PORT || 5000;
-
 app.use(cors());
 app.use(express.json());
 
@@ -26,14 +26,14 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
-    // ---------------------------------------------------------------------
-    // ----------------Database  Collection --------------------------------
-    // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// ----------------Database  Collection --------------------------------
+// ---------------------------------------------------------------------
     const database = client.db('online-ticket-booking-platform');
     const ticketsCollection = database.collection('tickets');
 
 
-    // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
     app.get('/api/tickets', async (req, res) => {
       const cursor = ticketsCollection.find();
@@ -41,15 +41,32 @@ async function run() {
       res.send(result);
     });
 
-    // ----------------------TICKET-POST-----------------------
+// ----------------------POST-TICKET-(VENDOR ONLY)----------------------
     app.post('/api/tickets', async (req, res) => {
       const newTicket = req.body;
       const result = await ticketsCollection.insertOne(newTicket);
       res.send(result);
     });
 
+// ----------------------GET VENDOR ADDED TICKETS--------------------------
+  app.get('/api/tickets/vendor/:userId', async (req, res) => {
+    const userId = req.params.userId;
+    const cursor = ticketsCollection.find({ vendorId: userId }).sort({_id: -1});
+    const result = await cursor.toArray();
+    res.send(result);
+  })
 
-    // --------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
+
+// ----------------------DELETE VENDOR ADDED TICKETS--------------------------
+ app.delete('/api/tickets/vendor/:id', async (req, res) => {
+  const id = req.params.id;
+  const query = { _id: new ObjectId(id) };
+  const result = await ticketsCollection.deleteOne(query);
+  res.send(result);
+ })
+
+
+// ------------------------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
 
 
     // Send a ping to confirm a successful connection
