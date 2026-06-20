@@ -31,15 +31,36 @@ async function run() {
     // ---------------------------------------------------------------------
     const database = client.db('online-ticket-booking-platform');
     const ticketsCollection = database.collection('tickets');
-
+    const bookingsCollection = database.collection('bookings');
 
     // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
-    app.get('/api/tickets', async (req, res) => {
-      const cursor = ticketsCollection.find();
-      const result = await cursor.toArray();
-      res.send(result);
-    });
+// ----------------------GET Approved ALL TICKETS----------------------
+    app.get('/api/tickets/all', async (req, res) => {
+  try {
+    const query = {
+      verificationStatus: 'approved',
+      isHidden: { $ne: true }
+    };
+
+    const cursor = ticketsCollection.find(query).sort({ _id: -1 });
+    const result = await cursor.toArray();
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: true, message: err.message });
+  }
+});
+
+app.get('/api/tickets/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await ticketsCollection.findOne(query);
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: true, message: err.message });
+  }
+});
 
     // ----------------------POST-TICKET-(VENDOR ONLY)----------------------
     app.post('/api/tickets', async (req, res) => {
@@ -85,7 +106,46 @@ async function run() {
       res.send(result);
     })
 
+    // ----------------------Update Admin Status------------------------
+    app.patch('/api/tickets/status/:id',  async (req, res) => {
+      const { verificationStatus } = req.body;
+      const result = await ticketsCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { verificationStatus } }
+      );
+      res.send(result);
+    });
+
+
+
+
     // ------------------------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
+
+
+    // ----------------------POST-Booking-TICKET-(USER)----------------------
+
+app.post('/api/booking', async (req, res) => {
+  const newBooking = req.body;
+  const result = await bookingsCollection.insertOne(newBooking);
+  res.send(result);
+})
+
+
+    // ----------------------POST-Booking-TICKET-(USER)----------------------
+
+app.get('/api/booking/user/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  const cursor = bookingsCollection.find({ userId: userId }).sort({ _id: -1 });
+  const result = await cursor.toArray();
+  res.send(result);
+})
+
+
+ // ------------------------------------------------------------------------------------------------------users ROUTES ---------------------------------------------------------------------------------------------------------------
+
+
+
+
 
 
     // Send a ping to confirm a successful connection
