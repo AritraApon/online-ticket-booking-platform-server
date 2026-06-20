@@ -35,32 +35,32 @@ async function run() {
 
     // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
-// ----------------------GET Approved ALL TICKETS----------------------
+    // ----------------------GET Approved ALL TICKETS----------------------
     app.get('/api/tickets/all', async (req, res) => {
-  try {
-    const query = {
-      verificationStatus: 'approved',
-      isHidden: { $ne: true }
-    };
+      try {
+        const query = {
+          verificationStatus: 'approved',
+          isHidden: { $ne: true }
+        };
 
-    const cursor = ticketsCollection.find(query).sort({ _id: -1 });
-    const result = await cursor.toArray();
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ error: true, message: err.message });
-  }
-});
+        const cursor = ticketsCollection.find(query).sort({ _id: -1 });
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: true, message: err.message });
+      }
+    });
 
-app.get('/api/tickets/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
-    const result = await ticketsCollection.findOne(query);
-    res.send(result);
-  } catch (err) {
-    res.status(500).send({ error: true, message: err.message });
-  }
-});
+    app.get('/api/tickets/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await ticketsCollection.findOne(query);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: true, message: err.message });
+      }
+    });
 
     // ----------------------POST-TICKET-(VENDOR ONLY)----------------------
     app.post('/api/tickets', async (req, res) => {
@@ -107,7 +107,7 @@ app.get('/api/tickets/:id', async (req, res) => {
     })
 
     // ----------------------Update Admin Status------------------------
-    app.patch('/api/tickets/status/:id',  async (req, res) => {
+    app.patch('/api/tickets/status/:id', async (req, res) => {
       const { verificationStatus } = req.body;
       const result = await ticketsCollection.updateOne(
         { _id: new ObjectId(req.params.id) },
@@ -124,24 +124,66 @@ app.get('/api/tickets/:id', async (req, res) => {
 
     // ----------------------POST-Booking-TICKET-(USER)----------------------
 
-app.post('/api/booking', async (req, res) => {
-  const newBooking = req.body;
-  const result = await bookingsCollection.insertOne(newBooking);
-  res.send(result);
-})
+    app.post('/api/booking', async (req, res) => {
+      const newBooking = req.body;
+      const result = await bookingsCollection.insertOne(newBooking);
+      res.send(result);
+    })
 
 
-    // ----------------------POST-Booking-TICKET-(USER)----------------------
+    // ----------------------Get-Booking-TICKET-(USER)----------------------
+    app.get('/api/booking/user/:userId', async (req, res) => {
+      try {
+        const userId = req.params.userId;
 
-app.get('/api/booking/user/:userId', async (req, res) => {
-  const userId = req.params.userId;
-  const cursor = bookingsCollection.find({ userId: userId }).sort({ _id: -1 });
-  const result = await cursor.toArray();
-  res.send(result);
-})
+        const cursor = bookingsCollection.find({ userId: userId });
+        const result = await cursor.toArray();
+
+        result.sort((a, b) => {
+          const statusA = (a.status === 'accepted' ) ? 1 : 0;
+          const statusB = (b.status === 'accepted' ) ? 1 : 0;
+          return statusB - statusA;
+        });
+
+        res.status(200).send(result);
+      } catch (error) {
+        res.status(500).send({ error: true, message: error.message });
+      }
+    });
+
+    // ----------------------Get-Booking-TICKET-(VENDOR)----------------------
+
+app.get('/api/booking/vendor/:vendorId', async (req, res) => {
+  try {
+    const vendorId = req.params.vendorId;
+    const cursor = bookingsCollection.find({ vendorId: vendorId });
+    const result = await cursor.toArray();
+    result.sort((a, b) => {
+          const statusA = (a.status === 'pending' ) ? 1 : 0;
+          const statusB = (b.status === 'pending' ) ? 1 : 0;
+          return statusB - statusA;
+        });
+    res.status(200).send(result);
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
+
+    // ----------------------Update-Status-Booking-TICKET-(VENDOR)--------------
+    app.patch('/api/booking/status/:id', async (req, res) => {
+      const { status } = req.body;
+      const result = await bookingsCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { status } }
+      );
+      res.send(result);
+    })
 
 
- // ------------------------------------------------------------------------------------------------------users ROUTES ---------------------------------------------------------------------------------------------------------------
+
+
+
+    // ------------------------------------------------------------------------------------------------------users ROUTES ---------------------------------------------------------------------------------------------------------------
 
 
 
