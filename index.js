@@ -32,6 +32,7 @@ async function run() {
     const database = client.db('online-ticket-booking-platform');
     const ticketsCollection = database.collection('tickets');
     const bookingsCollection = database.collection('bookings');
+    const usersCollection = database.collection('user');
 
     // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
@@ -186,6 +187,20 @@ app.get('/api/booking/vendor/:vendorId', async (req, res) => {
     // ------------------------------------------------------------------------------------------------------users ROUTES ---------------------------------------------------------------------------------------------------------------
 
 
+// ----------------------GET ALL USERS----------------------
+app.get('/api/users/admin/all', async (req, res) => {
+  const result = await usersCollection.find().toArray();
+  res.send(result);
+})
+// ----------------------UPDATE USER ROLE----------------------
+app.patch('/api/users/role/:id', async (req, res) => {
+  const { role } = req.body;
+  const result = await usersCollection.updateOne(
+    { _id: new ObjectId(req.params.id) },
+    { $set: { role } }
+  );
+  res.send(result);
+})
 
 
 
