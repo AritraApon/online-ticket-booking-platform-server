@@ -81,13 +81,22 @@ async function run() {
 
 
     // ----------------------DELETE VENDOR ADDED TICKETS--------------------------
-    app.delete('/api/tickets/vendor/:id', async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await ticketsCollection.deleteOne(query);
-      res.send(result);
-    })
+  app.delete('/api/tickets/vendor/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
 
+    const result = await ticketsCollection.deleteOne({ _id: new ObjectId(id) });
+
+    await bookingsCollection.updateMany(
+      { ticketId: id },
+      { $set: { ticketDeleted: true } }
+    );
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
     // ----------------------Update VENDOR ADDED TICKETS------------------------
     app.patch('/api/tickets/vendor/:id', async (req, res) => {
       const result = await ticketsCollection.updateOne(
@@ -133,25 +142,25 @@ async function run() {
 
 
     // ----------------------Get-Booking-TICKET-(USER)----------------------
-    app.get('/api/booking/user/:userId', async (req, res) => {
-      try {
-        const userId = req.params.userId;
+ app.get('/api/booking/user/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const query = { userId: userId };  
 
-        const cursor = bookingsCollection.find({ userId: userId });
-        const result = await cursor.toArray();
+    const cursor = bookingsCollection.find(query);
+    const result = await cursor.toArray();
 
-        result.sort((a, b) => {
-          const statusA = (a.status === 'accepted' ) ? 1 : 0;
-          const statusB = (b.status === 'accepted' ) ? 1 : 0;
-          return statusB - statusA;
-        });
-
-        res.status(200).send(result);
-      } catch (error) {
-        res.status(500).send({ error: true, message: error.message });
-      }
+    result.sort((a, b) => {
+      const statusA = (a.status === 'accepted') ? 1 : 0;
+      const statusB = (b.status === 'accepted') ? 1 : 0;
+      return statusB - statusA;
     });
 
+    res.status(200).send(result);
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
     // ----------------------Get-Booking-TICKET-(VENDOR)----------------------
 
 app.get('/api/booking/vendor/:vendorId', async (req, res) => {
@@ -187,22 +196,63 @@ app.get('/api/booking/vendor/:vendorId', async (req, res) => {
     // ------------------------------------------------------------------------------------------------------users ROUTES ---------------------------------------------------------------------------------------------------------------
 
 
-// ----------------------GET ALL USERS----------------------
+// ----------------------GET ALL USERS--(Admin)--------------------
 app.get('/api/users/admin/all', async (req, res) => {
   const result = await usersCollection.find().toArray();
   res.send(result);
 })
-// ----------------------UPDATE USER ROLE----------------------
+
+
+// ----------------------UPDATE USER ROLE-(Admin)---------------------
 app.patch('/api/users/role/:id', async (req, res) => {
-  const { role } = req.body;
-  const result = await usersCollection.updateOne(
-    { _id: new ObjectId(req.params.id) },
-    { $set: { role } }
-  );
-  res.send(result);
-})
+  try {
+    const { role } = req.body;
+    const result = await usersCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { role } }
+    );
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ success: false, message: 'Server error or invalid ID' });
+  }
+});
+//------------------------UPDATE USER isFRAUD-(Admin)---------------------
+app.patch('/api/users/fraud/:id', async (req, res) => {
+  try {
+    const { isFraud } = req.body;
+    const userId = req.params.id;
+
+    const result = await usersCollection.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { isFraud: isFraud } }
+    );
+
+    const vendor = await usersCollection.findOne({ _id: new ObjectId(userId) });
+
+    if (vendor) {
+      const targetVendorIdStr = vendor._id.toString();
+
+      await ticketsCollection.updateMany(
+        { vendorId: targetVendorIdStr },
+        { $set: { isHidden: isFraud } }
+      );
 
 
+      await bookingsCollection.updateMany(
+        { vendorId: targetVendorIdStr },
+        { $set: { isFraud: isFraud } }
+      );
+    }
+
+    res.send({ success: true, message: isFraud ? 'Marked as fraud successfully' : 'Fraud status cleared successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ success: false, message: 'Server error' });
+  }
+});
+
+  // ------------------------------------------------------------------------------------------------------PAYMENT ROUTES ---------------------------------------------------------------------------------------------------------------
 
 
     // Send a ping to confirm a successful connection
