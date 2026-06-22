@@ -37,7 +37,7 @@ async function run() {
 
     // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
-    // ----------------------GET Approved ALL TICKETS----------------------
+
  // ----------------------GET Approved ALL TICKETS (with search, filter, sort, pagination)----------------------
 app.get('/api/tickets/all', async (req, res) => {
   try {
@@ -77,8 +77,49 @@ app.get('/api/tickets/all', async (req, res) => {
   } catch (err) {
     res.status(500).send({ error: true, message: err.message });
   }
-});;
+});
 
+// ------(home Page)------------Admin GET Approved Advertise Tickets ----------------------
+    app.get('/api/tickets/admin/advertise', async (req, res) => {
+  try {
+    const result = await ticketsCollection
+      .find({
+       
+        isAdvertised: { $in: [true, 'true'] },
+
+
+        isHidden: { $ne: true }
+      })
+      .toArray();
+
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: true, message: err.message });
+  }
+});
+
+// Homepage: latest tickets (6-8)
+app.get('/api/tickets/latest', async (req, res) => {
+  try {
+    const result = await ticketsCollection
+      .find({
+        verificationStatus: 'approved',
+        isHidden: { $ne: true } // 👈 false এর বদলে এটা দে, তাহলে ফাকা ফিল্ডগুলোও আসবে
+      })
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .toArray();
+
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: true, message: err.message });
+  }
+});
+
+
+
+
+// Details Page (GET TICKET BY ID)
     app.get('/api/tickets/:id', async (req, res) => {
       try {
         const id = req.params.id;
@@ -91,11 +132,7 @@ app.get('/api/tickets/all', async (req, res) => {
     });
 
 
-// ------(home Page)------------Admin GET Approved Advertise Tickets ----------------------
-    app.get('/api/tickets/admin/advertise', async (req, res) => {
-      const result = await ticketsCollection.find({ isAdvertised: true, isHidden: false }).toArray();
-      res.send(result);
-    })
+
 
 
     // ----------------------POST-TICKET-(VENDOR ONLY)----------------------
