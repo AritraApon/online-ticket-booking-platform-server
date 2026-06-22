@@ -20,7 +20,6 @@ const client = new MongoClient(uri, {
 });
 
 
-
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -34,7 +33,65 @@ async function run() {
     const bookingsCollection = database.collection('bookings');
     const usersCollection = database.collection('user');
     const transactionsCollection = database.collection('transactions');
+    const sessionsCollection = database.collection('session');
 
+    // ---------------------------------------------------------------------
+// ----------------Middleware verifyJWT --------------------------------
+// ---------------------------------------------------------------------
+
+const verifyJWT = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).send({ error: true, message: 'unauthorized access' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return res.status(401).send({ error: true, message: 'unauthorized access' });
+    }
+
+    const session = await sessionsCollection.findOne({ token: token });
+    if (!session) {
+      return res.status(401).send({ error: true, message: 'invalid or expired session' });
+    }
+
+    const user = await usersCollection.findOne({ _id: new ObjectId(session.userId) });
+    if (!user) {
+      return res.status(401).send({ error: true, message: 'user not found' });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    console.error('verifyJWT error:', error);
+    return res.status(500).send({ error: true, message: 'authentication error' });
+  }
+};
+
+const verifyAdmin = async(req, res, next) => {
+  const user = req.user;
+  if (user?.role !== 'admin') {
+    return res.status(403).send({ error: true, message: 'forbidden' });
+  }
+  next();
+}
+
+const verifyUser = async(req, res, next) => {
+  const user = req.user;
+  if (user?.role !== 'user') {
+    return res.status(403).send({ error: true, message: 'forbidden' });
+  }
+  next();
+}
+
+const verifyVendor = async(req, res, next) => {
+  const user = req.user;
+  if (user?.role !== 'vendor') {
+    return res.status(403).send({ error: true, message: 'forbidden' });
+  }
+  next();
+}
     // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
 
@@ -79,12 +136,12 @@ app.get('/api/tickets/all', async (req, res) => {
   }
 });
 
-// ------(home Page)------------Admin GET Approved Advertise Tickets ----------------------
+// ------(home Page)-Admin GET Approved Advertise Tickets ----------------------
     app.get('/api/tickets/admin/advertise', async (req, res) => {
   try {
     const result = await ticketsCollection
       .find({
-       
+
         isAdvertised: { $in: [true, 'true'] },
 
 
@@ -104,7 +161,7 @@ app.get('/api/tickets/latest', async (req, res) => {
     const result = await ticketsCollection
       .find({
         verificationStatus: 'approved',
-        isHidden: { $ne: true } // 👈 false এর বদলে এটা দে, তাহলে ফাকা ফিল্ডগুলোও আসবে
+        isHidden: { $ne: true }
       })
       .sort({ createdAt: -1 })
       .limit(8)
@@ -120,7 +177,7 @@ app.get('/api/tickets/latest', async (req, res) => {
 
 
 // Details Page (GET TICKET BY ID)
-    app.get('/api/tickets/:id', async (req, res) => {
+    app.get('/api/tickets/:id',verifyJWT, async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
@@ -136,14 +193,14 @@ app.get('/api/tickets/latest', async (req, res) => {
 
 
     // ----------------------POST-TICKET-(VENDOR ONLY)----------------------
-    app.post('/api/tickets', async (req, res) => {
+    app.post('/api/tickets',verifyVendor,verifyJWT, async (req, res) => {
       const newTicket = req.body;
       const result = await ticketsCollection.insertOne(newTicket);
       res.send(result);
     });
 
     // ----------------------GET VENDOR ADDED TICKETS--------------------------
-    app.get('/api/tickets/vendor/:userId', async (req, res) => {
+    app.get('/api/tickets/vendor/:userId',verifyJWT,verifyVendor, async (req, res) => {
       const userId = req.params.userId;
       const cursor = ticketsCollection.find({ vendorId: userId }).sort({ _id: -1 });
       const result = await cursor.toArray();
@@ -153,7 +210,7 @@ app.get('/api/tickets/latest', async (req, res) => {
 
 
     // ----------------------DELETE VENDOR ADDED TICKETS--------------------------
-    app.delete('/api/tickets/vendor/:id', async (req, res) => {
+    app.delete('/api/tickets/vendor/:id',verifyJWT,verifyVendor, async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -170,7 +227,7 @@ app.get('/api/tickets/latest', async (req, res) => {
       }
     });
     // ----------------------Update VENDOR ADDED TICKETS------------------------
-    app.patch('/api/tickets/vendor/:id', async (req, res) => {
+    app.patch('/api/tickets/vendor/:id',verifyJWT,verifyVendor, async (req, res) => {
       const result = await ticketsCollection.updateOne(
         { _id: new ObjectId(req.params.id) },
         { $set: req.body }
@@ -180,7 +237,7 @@ app.get('/api/tickets/latest', async (req, res) => {
 
     // ----------------------Get Admin all Tickets------------------------
 
-    app.get('/api/tickets/admin/all', async (req, res) => {
+    app.get('/api/tickets/admin/all',verifyJWT,verifyAdmin, async (req, res) => {
       const result = await ticketsCollection
         .find()
         .sort({ verificationStatus: 1, createdAt: -1 }) // pending আগে দেখাবে
@@ -189,7 +246,7 @@ app.get('/api/tickets/latest', async (req, res) => {
     })
 
     // ----------------------Update Admin Status------------------------
-    app.patch('/api/tickets/status/:id', async (req, res) => {
+    app.patch('/api/tickets/status/:id',verifyJWT,verifyAdmin, async (req, res) => {
       const { verificationStatus } = req.body;
       const result = await ticketsCollection.updateOne(
         { _id: new ObjectId(req.params.id) },
@@ -198,8 +255,8 @@ app.get('/api/tickets/latest', async (req, res) => {
       res.send(result);
     });
 
-    // ----------------------Update Admin Status------------------------
-  app.patch('/api/tickets/advertise/:id', async (req, res) => {
+    // ----------------------Update Admin isAdvertised-------------------------
+  app.patch('/api/tickets/advertise/:id',verifyJWT,verifyAdmin, async (req, res) => {
   try {
     const { isAdvertised } = req.body;
     const result = await ticketsCollection.updateOne(
@@ -217,7 +274,7 @@ app.get('/api/tickets/latest', async (req, res) => {
 
     // ----------------------POST-Booking-TICKET-(USER)----------------------
 
-    app.post('/api/booking', async (req, res) => {
+    app.post('/api/booking',verifyJWT,verifyUser, async (req, res) => {
       const newBooking = req.body;
       const result = await bookingsCollection.insertOne(newBooking);
       res.send(result);
@@ -225,7 +282,7 @@ app.get('/api/tickets/latest', async (req, res) => {
 
 
     // ----------------------Get-Booking-TICKET-(USER)----------------------
-    app.get('/api/booking/user/:userId', async (req, res) => {
+    app.get('/api/booking/user/:userId',verifyJWT,verifyUser, async (req, res) => {
       try {
         const userId = req.params.userId;
         const query = { userId: userId };
@@ -246,7 +303,7 @@ app.get('/api/tickets/latest', async (req, res) => {
     });
     // ----------------------Get-Booking-TICKET-(VENDOR)----------------------
 
-    app.get('/api/booking/vendor/:vendorId', async (req, res) => {
+    app.get('/api/booking/vendor/:vendorId',verifyJWT,verifyVendor, async (req, res) => {
       try {
         const vendorId = req.params.vendorId;
         const cursor = bookingsCollection.find({ vendorId: vendorId });
@@ -263,7 +320,7 @@ app.get('/api/tickets/latest', async (req, res) => {
     });
 
     // ----------------------Update-Status-Booking-TICKET-(VENDOR)--------------
-    app.patch('/api/booking/status/:id', async (req, res) => {
+    app.patch('/api/booking/status/:id',verifyJWT,verifyVendor, async (req, res) => {
       const { status } = req.body;
       const result = await bookingsCollection.updateOne(
         { _id: new ObjectId(req.params.id) },
@@ -280,14 +337,14 @@ app.get('/api/tickets/latest', async (req, res) => {
 
 
     // ----------------------GET ALL USERS--(Admin)--------------------
-    app.get('/api/users/admin/all', async (req, res) => {
+    app.get('/api/users/admin/all',verifyJWT,verifyAdmin, async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     })
 
 
     // ----------------------UPDATE USER ROLE-(Admin)---------------------
-    app.patch('/api/users/role/:id', async (req, res) => {
+    app.patch('/api/users/role/:id',verifyJWT,verifyAdmin, async (req, res) => {
       try {
         const { role } = req.body;
         const result = await usersCollection.updateOne(
@@ -301,7 +358,7 @@ app.get('/api/tickets/latest', async (req, res) => {
       }
     });
     //------------------------UPDATE USER isFRAUD-(Admin)---------------------
-    app.patch('/api/users/fraud/:id', async (req, res) => {
+    app.patch('/api/users/fraud/:id',verifyJWT,verifyAdmin, async (req, res) => {
       try {
         const { isFraud } = req.body;
         const userId = req.params.id;
@@ -337,10 +394,10 @@ app.get('/api/tickets/latest', async (req, res) => {
 
     // ------------------------------------------------------------------------------------------------------PAYMENT ROUTES ---------------------------------------------------------------------------------------------------------------
 
-    app.patch('/api/booking/payment-success/:id', async (req, res) => {
+    app.patch('/api/booking/payment-success/:id',verifyJWT,verifyUser, async (req, res) => {
       try {
         const bookingId = req.params.id;
-        const { transactionId, amount } = req.body;  // client থেকে এই দুইটাই আসবে
+        const { transactionId, amount } = req.body;
 
         const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
         if (!booking) {
@@ -380,7 +437,7 @@ app.get('/api/tickets/latest', async (req, res) => {
     });
 
     // ----------------------Get User's Transaction History----------------------
-    app.get('/api/transactions/user/:userId', async (req, res) => {
+    app.get('/api/transactions/user/:userId',verifyJWT,verifyUser, async (req, res) => {
       try {
         const userId = req.params.userId;
         const result = await transactionsCollection
@@ -395,7 +452,7 @@ app.get('/api/tickets/latest', async (req, res) => {
 
     // ----------------------Vendor Revenue Overview----------------------
 
-    app.get('/api/revenue/vendor/:vendorId', async (req, res) => {
+    app.get('/api/revenue/vendor/:vendorId',verifyJWT,verifyVendor, async (req, res) => {
       try {
         const vendorId = req.params.vendorId;
 
