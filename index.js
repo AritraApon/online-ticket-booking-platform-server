@@ -38,20 +38,46 @@ async function run() {
     // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
     // ----------------------GET Approved ALL TICKETS----------------------
-    app.get('/api/tickets/all', async (req, res) => {
-      try {
-        const query = {
-          verificationStatus: 'approved',
-          isHidden: { $ne: true }
-        };
+ // ----------------------GET Approved ALL TICKETS (with search, filter, sort, pagination)----------------------
+app.get('/api/tickets/all', async (req, res) => {
+  try {
+    const { from, to, transport, sort, page = 1, limit = 6 } = req.query;
 
-        const cursor = ticketsCollection.find(query).sort({ _id: -1 });
-        const result = await cursor.toArray();
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: true, message: err.message });
-      }
+    const query = {
+      verificationStatus: 'approved',
+      isHidden: { $ne: true }
+    };
+
+    if (from) query.from = { $regex: from, $options: 'i' };
+    if (to) query.to = { $regex: to, $options: 'i' };
+    if (transport && transport !== 'all') query.transportType = transport;
+
+    let sortOption = { _id: -1 }; // default
+    if (sort === 'lowToHigh') sortOption = { pricePerUnit: 1 };
+    if (sort === 'highToLow') sortOption = { pricePerUnit: -1 };
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const total = await ticketsCollection.countDocuments(query);
+    const result = await ticketsCollection
+      .find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limitNum)
+      .toArray();
+
+    res.send({
+      tickets: result,
+      totalCount: total,
+      totalPages: Math.ceil(total / limitNum),
+      currentPage: pageNum
     });
+  } catch (err) {
+    res.status(500).send({ error: true, message: err.message });
+  }
+});;
 
     app.get('/api/tickets/:id', async (req, res) => {
       try {
@@ -63,6 +89,14 @@ async function run() {
         res.status(500).send({ error: true, message: err.message });
       }
     });
+
+
+// ------(home Page)------------Admin GET Approved Advertise Tickets ----------------------
+    app.get('/api/tickets/admin/advertise', async (req, res) => {
+      const result = await ticketsCollection.find({ isAdvertised: true, isHidden: false }).toArray();
+      res.send(result);
+    })
+
 
     // ----------------------POST-TICKET-(VENDOR ONLY)----------------------
     app.post('/api/tickets', async (req, res) => {
@@ -127,8 +161,19 @@ async function run() {
       res.send(result);
     });
 
-
-
+    // ----------------------Update Admin Status------------------------
+  app.patch('/api/tickets/advertise/:id', async (req, res) => {
+  try {
+    const { isAdvertised } = req.body;
+    const result = await ticketsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { isAdvertised: isAdvertised } }
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Internal Server Error", error });
+  }
+});
 
     // ------------------------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
 
@@ -320,7 +365,7 @@ async function run() {
 
         const totalTicketsAdded = await ticketsCollection.countDocuments({ vendorId });
 
-        
+
         const paidBookings = await bookingsCollection.find({ vendorId, status: 'paid' }).toArray();
 
         const totalTicketsSold = paidBookings.reduce((sum, b) => sum + b.bookingQuantity, 0);
