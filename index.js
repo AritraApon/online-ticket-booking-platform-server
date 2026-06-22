@@ -255,47 +255,47 @@ async function run() {
 
     // ------------------------------------------------------------------------------------------------------PAYMENT ROUTES ---------------------------------------------------------------------------------------------------------------
 
-   app.patch('/api/booking/payment-success/:id', async (req, res) => {
-  try {
-    const bookingId = req.params.id;
-    const { transactionId, amount } = req.body;  // client থেকে এই দুইটাই আসবে
+    app.patch('/api/booking/payment-success/:id', async (req, res) => {
+      try {
+        const bookingId = req.params.id;
+        const { transactionId, amount } = req.body;  // client থেকে এই দুইটাই আসবে
 
-    const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
-    if (!booking) {
-      return res.status(404).send({ error: true, message: 'Booking not found' });
-    }
+        const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
+        if (!booking) {
+          return res.status(404).send({ error: true, message: 'Booking not found' });
+        }
 
-    if (booking.status === 'paid') {
-      return res.send({ success: true, message: 'Already processed' });
-    }
+        if (booking.status === 'paid') {
+          return res.send({ success: true, message: 'Already processed' });
+        }
 
-    await bookingsCollection.updateOne(
-      { _id: new ObjectId(bookingId) },
-      { $set: { status: 'paid' } }
-    );
+        await bookingsCollection.updateOne(
+          { _id: new ObjectId(bookingId) },
+          { $set: { status: 'paid' } }
+        );
 
-    await ticketsCollection.updateOne(
-      { _id: new ObjectId(booking.ticketId) },
-      { $inc: { quantity: -booking.bookingQuantity } }
-    );
+        await ticketsCollection.updateOne(
+          { _id: new ObjectId(booking.ticketId) },
+          { $inc: { quantity: -booking.bookingQuantity } }
+        );
 
-    // booking থেকেই userId, userEmail, ticketTitle নেওয়া হচ্ছে - client থেকে পাঠাতে হবে না
-    const transaction = {
-      transactionId,
-      bookingId,
-      userId: booking.userId,
-      userEmail: booking.userEmail,
-      ticketTitle: booking.ticketTitle,
-      amount,
-      paymentDate: new Date()
-    };
-    await transactionsCollection.insertOne(transaction);
 
-    res.send({ success: true, message: 'Payment confirmed and updated' });
-  } catch (error) {
-    res.status(500).send({ error: true, message: error.message });
-  }
-});
+        const transaction = {
+          transactionId,
+          bookingId,
+          userId: booking.userId,
+          userEmail: booking.userEmail,
+          ticketTitle: booking.ticketTitle,
+          amount,
+          paymentDate: new Date()
+        };
+        await transactionsCollection.insertOne(transaction);
+
+        res.send({ success: true, message: 'Payment confirmed and updated' });
+      } catch (error) {
+        res.status(500).send({ error: true, message: error.message });
+      }
+    });
 
     // ----------------------Get User's Transaction History----------------------
     app.get('/api/transactions/user/:userId', async (req, res) => {
@@ -312,17 +312,26 @@ async function run() {
     });
 
     // ----------------------Vendor Revenue Overview----------------------
+
     app.get('/api/revenue/vendor/:vendorId', async (req, res) => {
       try {
         const vendorId = req.params.vendorId;
 
+
         const totalTicketsAdded = await ticketsCollection.countDocuments({ vendorId });
 
+        
         const paidBookings = await bookingsCollection.find({ vendorId, status: 'paid' }).toArray();
+
         const totalTicketsSold = paidBookings.reduce((sum, b) => sum + b.bookingQuantity, 0);
         const totalRevenue = paidBookings.reduce((sum, b) => sum + b.totalPrice, 0);
 
-        res.send({ totalTicketsAdded, totalTicketsSold, totalRevenue, paidBookings });
+        res.send({
+          totalTicketsAdded,
+          totalTicketsSold,
+          totalRevenue,
+          paidBookings
+        });
       } catch (error) {
         res.status(500).send({ error: true, message: error.message });
       }
