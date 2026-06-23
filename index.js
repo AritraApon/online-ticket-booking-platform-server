@@ -1,16 +1,15 @@
 const express = require('express');
 const cors = require('cors');
-const { ObjectId } = require('mongodb');
-const app = express()
+const { ObjectId, MongoClient, ServerApiVersion } = require('mongodb');
 require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
+
+const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
 const uri = process.env.MONGO_DB_URI;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -19,33 +18,50 @@ const client = new MongoClient(uri, {
   }
 });
 
+let db;
+
+// 🎯 এটাই মূল ফিক্স - connection cache করে রাখা এবং reuse করা
+async function connectDB() {
+  if (db) {
+    return db; // already connected, reuse করো
+  }
+  await client.connect();
+  db = client.db('online-ticket-booking-platform');
+  console.log('Connected to MongoDB');
+  return db;
+}
+
+// 🎯 প্রতিটা request এ connection নিশ্চিত করার middleware
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    console.error('DB connection error:', error);
+    res.status(500).send({ error: true, message: 'Database connection failed' });
+  }
+});
+
 app.get('/', (req, res) => {
-  res.send('Hello World!')
-})
+  res.send('Hello World!');
+});
 
-client.connect(()=>{console.log('Connected to MongoDB') }).catch(console.dir)
+// Collections - getter function ব্যবহার করো যাতে সবসময় current db থেকে নেয়
+const getCollections = () => ({
+  ticketsCollection: db.collection('tickets'),
+  bookingsCollection: db.collection('bookings'),
+  usersCollection: db.collection('user'),
+  transactionsCollection: db.collection('transactions'),
+  sessionsCollection: db.collection('session'),
+});
 
-// async function run() {
-//   try {
-//     // Connect the client to the server	(optional starting in v4.7)
-//     await client.connect();
-
-    // ---------------------------------------------------------------------
-    // ----------------Database  Collection --------------------------------
-    // ---------------------------------------------------------------------
-    const database = client.db('online-ticket-booking-platform');
-    const ticketsCollection = database.collection('tickets');
-    const bookingsCollection = database.collection('bookings');
-    const usersCollection = database.collection('user');
-    const transactionsCollection = database.collection('transactions');
-    const sessionsCollection = database.collection('session');
-
-    // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
 // ----------------Middleware verifyJWT --------------------------------
 // ---------------------------------------------------------------------
 
 const verifyJWT = async (req, res, next) => {
   try {
+    const { sessionsCollection, usersCollection } = getCollections();
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).send({ error: true, message: 'unauthorized access' });
@@ -74,35 +90,35 @@ const verifyJWT = async (req, res, next) => {
   }
 };
 
-const verifyAdmin = async(req, res, next) => {
+const verifyAdmin = async (req, res, next) => {
   const user = req.user;
   if (user?.role !== 'admin') {
     return res.status(403).send({ error: true, message: 'forbidden' });
   }
   next();
-}
+};
 
-const verifyUser = async(req, res, next) => {
+const verifyUser = async (req, res, next) => {
   const user = req.user;
   if (user?.role !== 'user') {
     return res.status(403).send({ error: true, message: 'forbidden' });
   }
   next();
-}
+};
 
-const verifyVendor = async(req, res, next) => {
+const verifyVendor = async (req, res, next) => {
   const user = req.user;
   if (user?.role !== 'vendor') {
     return res.status(403).send({ error: true, message: 'forbidden' });
   }
   next();
-}
-    // --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
+};
 
+// --------------------------------------------------------------------------------------TICKET ROUTES ---------------------------------------------------------------------------------------------------------------
 
- // ----------------------GET Approved ALL TICKETS (with search, filter, sort, pagination)----------------------
 app.get('/api/tickets/all', async (req, res) => {
   try {
+    const { ticketsCollection } = getCollections();
     const { from, to, transport, sort, page = 1, limit = 6 } = req.query;
 
     const query = {
@@ -114,7 +130,7 @@ app.get('/api/tickets/all', async (req, res) => {
     if (to) query.to = { $regex: to, $options: 'i' };
     if (transport && transport !== 'all') query.transportType = transport;
 
-    let sortOption = { _id: -1 }; // default
+    let sortOption = { _id: -1 };
     if (sort === 'lowToHigh') sortOption = { pricePerUnit: 1 };
     if (sort === 'highToLow') sortOption = { pricePerUnit: -1 };
 
@@ -141,29 +157,25 @@ app.get('/api/tickets/all', async (req, res) => {
   }
 });
 
-// ------(home Page)-Admin GET Approved Advertise Tickets ----------------------
-    app.get('/api/tickets/admin/advertise', async (req, res) => {
+app.get('/api/tickets/admin/advertise', async (req, res) => {
   try {
+    const { ticketsCollection } = getCollections();
     const result = await ticketsCollection
       .find({
-
         isAdvertised: { $in: [true, 'true'] },
-
-
         isHidden: { $ne: true }
       })
       .limit(6)
       .toArray();
-
     res.send(result);
   } catch (err) {
     res.status(500).send({ error: true, message: err.message });
   }
 });
 
-// Homepage: latest tickets (6-8)
 app.get('/api/tickets/latest', async (req, res) => {
   try {
+    const { ticketsCollection } = getCollections();
     const result = await ticketsCollection
       .find({
         verificationStatus: 'approved',
@@ -172,102 +184,81 @@ app.get('/api/tickets/latest', async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(8)
       .toArray();
-
     res.send(result);
   } catch (err) {
     res.status(500).send({ error: true, message: err.message });
   }
 });
 
-
-
-
-// Details Page (GET TICKET BY ID)
-    app.get('/api/tickets/:id',verifyJWT, async (req, res) => {
-      try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
-        const result = await ticketsCollection.findOne(query);
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: true, message: err.message });
-      }
-    });
-
-
-
-
-
-    // ----------------------POST-TICKET-(VENDOR ONLY)----------------------
-    app.post('/api/tickets', verifyJWT,verifyVendor, async (req, res) => {
-      const newTicket = req.body;
-      const result = await ticketsCollection.insertOne(newTicket);
-      res.send(result);
-    });
-
-    // ----------------------GET VENDOR ADDED TICKETS--------------------------
-    app.get('/api/tickets/vendor/:userId',verifyJWT,verifyVendor, async (req, res) => {
-      const userId = req.params.userId;
-      const cursor = ticketsCollection.find({ vendorId: userId }).sort({ _id: -1 });
-      const result = await cursor.toArray();
-      res.send(result);
-    })
-
-
-
-    // ----------------------DELETE VENDOR ADDED TICKETS--------------------------
-    app.delete('/api/tickets/vendor/:id',verifyJWT,verifyVendor, async (req, res) => {
-      try {
-        const id = req.params.id;
-
-        const result = await ticketsCollection.deleteOne({ _id: new ObjectId(id) });
-
-        await bookingsCollection.updateMany(
-          { ticketId: id },
-          { $set: { ticketDeleted: true } }
-        );
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ error: true, message: error.message });
-      }
-    });
-    // ----------------------Update VENDOR ADDED TICKETS------------------------
-    app.patch('/api/tickets/vendor/:id',verifyJWT,verifyVendor, async (req, res) => {
-      const result = await ticketsCollection.updateOne(
-        { _id: new ObjectId(req.params.id) },
-        { $set: req.body }
-      );
-      res.send(result);
-    })
-
-    // ----------------------Get Admin all Tickets------------------------
-
-    app.get('/api/tickets/admin/all',verifyJWT,verifyAdmin, async (req, res) => {
-      const result = await ticketsCollection
-        .find()
-        .sort({ verificationStatus: 1, createdAt: -1 }) // pending আগে দেখাবে
-        .toArray();
-      res.send(result);
-    })
-
-    // ----------------------Update Admin Status------------------------
-    app.patch('/api/tickets/status/:id',verifyJWT,verifyAdmin, async (req, res) => {
-      const { verificationStatus } = req.body;
-      const result = await ticketsCollection.updateOne(
-        { _id: new ObjectId(req.params.id) },
-        { $set: { verificationStatus } }
-      );
-      res.send(result);
-    });
-
-    // ----------------------Update Admin isAdvertised-------------------------
-  app.patch('/api/tickets/advertise/:id',verifyJWT,verifyAdmin, async (req, res) => {
+app.get('/api/tickets/:id', verifyJWT, async (req, res) => {
   try {
+    const { ticketsCollection } = getCollections();
+    const id = req.params.id;
+    const result = await ticketsCollection.findOne({ _id: new ObjectId(id) });
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: true, message: err.message });
+  }
+});
+
+app.post('/api/tickets', verifyJWT, verifyVendor, async (req, res) => {
+  const { ticketsCollection } = getCollections();
+  const newTicket = req.body;
+  const result = await ticketsCollection.insertOne(newTicket);
+  res.send(result);
+});
+
+app.get('/api/tickets/vendor/:userId', verifyJWT, verifyVendor, async (req, res) => {
+  const { ticketsCollection } = getCollections();
+  const userId = req.params.userId;
+  const result = await ticketsCollection.find({ vendorId: userId }).sort({ _id: -1 }).toArray();
+  res.send(result);
+});
+
+app.delete('/api/tickets/vendor/:id', verifyJWT, verifyVendor, async (req, res) => {
+  try {
+    const { ticketsCollection, bookingsCollection } = getCollections();
+    const id = req.params.id;
+    const result = await ticketsCollection.deleteOne({ _id: new ObjectId(id) });
+    await bookingsCollection.updateMany({ ticketId: id }, { $set: { ticketDeleted: true } });
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
+
+app.patch('/api/tickets/vendor/:id', verifyJWT, verifyVendor, async (req, res) => {
+  const { ticketsCollection } = getCollections();
+  const result = await ticketsCollection.updateOne(
+    { _id: new ObjectId(req.params.id) },
+    { $set: req.body }
+  );
+  res.send(result);
+});
+
+app.get('/api/tickets/admin/all', verifyJWT, verifyAdmin, async (req, res) => {
+  const { ticketsCollection } = getCollections();
+  const result = await ticketsCollection.find().sort({ verificationStatus: 1, createdAt: -1 }).toArray();
+  res.send(result);
+});
+
+app.patch('/api/tickets/status/:id', verifyJWT, verifyAdmin, async (req, res) => {
+  const { ticketsCollection } = getCollections();
+  const { verificationStatus } = req.body;
+  const result = await ticketsCollection.updateOne(
+    { _id: new ObjectId(req.params.id) },
+    { $set: { verificationStatus } }
+  );
+  res.send(result);
+});
+
+app.patch('/api/tickets/advertise/:id', verifyJWT, verifyAdmin, async (req, res) => {
+  try {
+    const { ticketsCollection } = getCollections();
     const { isAdvertised } = req.body;
     const result = await ticketsCollection.updateOne(
       { _id: new ObjectId(req.params.id) },
-      { $set: { isAdvertised: isAdvertised } }
+      { $set: { isAdvertised } }
     );
     res.send(result);
   } catch (error) {
@@ -275,233 +266,159 @@ app.get('/api/tickets/latest', async (req, res) => {
   }
 });
 
-    // ------------------------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------------BOOKING ROUTES ---------------------------------------------------------------------------------------------------------------
 
+app.post('/api/booking', verifyJWT, verifyUser, async (req, res) => {
+  const { bookingsCollection } = getCollections();
+  const newBooking = req.body;
+  const result = await bookingsCollection.insertOne(newBooking);
+  res.send(result);
+});
 
-    // ----------------------POST-Booking-TICKET-(USER)----------------------
+app.get('/api/booking/user/:userId', verifyJWT, verifyUser, async (req, res) => {
+  try {
+    const { bookingsCollection } = getCollections();
+    const userId = req.params.userId;
+    const result = await bookingsCollection.find({ userId }).toArray();
+    result.sort((a, b) => (b.status === 'accepted' ? 1 : 0) - (a.status === 'accepted' ? 1 : 0));
+    res.status(200).send(result);
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
 
-    app.post('/api/booking',verifyJWT,verifyUser, async (req, res) => {
-      const newBooking = req.body;
-      const result = await bookingsCollection.insertOne(newBooking);
-      res.send(result);
-    })
+app.get('/api/booking/vendor/:vendorId', verifyJWT, verifyVendor, async (req, res) => {
+  try {
+    const { bookingsCollection } = getCollections();
+    const vendorId = req.params.vendorId;
+    const result = await bookingsCollection.find({ vendorId }).toArray();
+    result.sort((a, b) => (b.status === 'pending' ? 1 : 0) - (a.status === 'pending' ? 1 : 0));
+    res.status(200).send(result);
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
 
+app.patch('/api/booking/status/:id', verifyJWT, verifyVendor, async (req, res) => {
+  const { bookingsCollection } = getCollections();
+  const { status } = req.body;
+  const result = await bookingsCollection.updateOne(
+    { _id: new ObjectId(req.params.id) },
+    { $set: { status } }
+  );
+  res.send(result);
+});
 
-    // ----------------------Get-Booking-TICKET-(USER)----------------------
-    app.get('/api/booking/user/:userId',verifyJWT,verifyUser, async (req, res) => {
-      try {
-        const userId = req.params.userId;
-        const query = { userId: userId };
+// ------------------------------------------------------------------------------------------------------users ROUTES ---------------------------------------------------------------------------------------------------------------
 
-        const cursor = bookingsCollection.find(query);
-        const result = await cursor.toArray();
+app.get('/api/users/admin/all', verifyJWT, verifyAdmin, async (req, res) => {
+  const { usersCollection } = getCollections();
+  const result = await usersCollection.find().toArray();
+  res.send(result);
+});
 
-        result.sort((a, b) => {
-          const statusA = (a.status === 'accepted') ? 1 : 0;
-          const statusB = (b.status === 'accepted') ? 1 : 0;
-          return statusB - statusA;
-        });
+app.patch('/api/users/role/:id', verifyJWT, verifyAdmin, async (req, res) => {
+  try {
+    const { usersCollection } = getCollections();
+    const { role } = req.body;
+    const result = await usersCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { role } }
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ success: false, message: 'Server error or invalid ID' });
+  }
+});
 
-        res.status(200).send(result);
-      } catch (error) {
-        res.status(500).send({ error: true, message: error.message });
-      }
-    });
-    // ----------------------Get-Booking-TICKET-(VENDOR)----------------------
+app.patch('/api/users/fraud/:id', verifyJWT, verifyAdmin, async (req, res) => {
+  try {
+    const { usersCollection, ticketsCollection, bookingsCollection } = getCollections();
+    const { isFraud } = req.body;
+    const userId = req.params.id;
 
-    app.get('/api/booking/vendor/:vendorId',verifyJWT,verifyVendor, async (req, res) => {
-      try {
-        const vendorId = req.params.vendorId;
-        const cursor = bookingsCollection.find({ vendorId: vendorId });
-        const result = await cursor.toArray();
-        result.sort((a, b) => {
-          const statusA = (a.status === 'pending') ? 1 : 0;
-          const statusB = (b.status === 'pending') ? 1 : 0;
-          return statusB - statusA;
-        });
-        res.status(200).send(result);
-      } catch (error) {
-        res.status(500).send({ error: true, message: error.message });
-      }
-    });
+    await usersCollection.updateOne({ _id: new ObjectId(userId) }, { $set: { isFraud } });
 
-    // ----------------------Update-Status-Booking-TICKET-(VENDOR)--------------
-    app.patch('/api/booking/status/:id',verifyJWT,verifyVendor, async (req, res) => {
-      const { status } = req.body;
-      const result = await bookingsCollection.updateOne(
-        { _id: new ObjectId(req.params.id) },
-        { $set: { status } }
-      );
-      res.send(result);
-    })
+    const vendor = await usersCollection.findOne({ _id: new ObjectId(userId) });
+    if (vendor) {
+      const targetVendorIdStr = vendor._id.toString();
+      await ticketsCollection.updateMany({ vendorId: targetVendorIdStr }, { $set: { isHidden: isFraud } });
+      await bookingsCollection.updateMany({ vendorId: targetVendorIdStr }, { $set: { isFraud } });
+    }
 
+    res.send({ success: true, message: isFraud ? 'Marked as fraud successfully' : 'Fraud status cleared successfully' });
+  } catch (error) {
+    res.status(500).send({ success: false, message: 'Server error' });
+  }
+});
 
+// ------------------------------------------------------------------------------------------------------PAYMENT ROUTES ---------------------------------------------------------------------------------------------------------------
 
+app.patch('/api/booking/payment-success/:id', verifyJWT, verifyUser, async (req, res) => {
+  try {
+    const { bookingsCollection, ticketsCollection, transactionsCollection } = getCollections();
+    const bookingId = req.params.id;
+    const { transactionId, amount } = req.body;
 
+    const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
+    if (!booking) return res.status(404).send({ error: true, message: 'Booking not found' });
+    if (booking.status === 'paid') return res.send({ success: true, message: 'Already processed' });
 
-    // ------------------------------------------------------------------------------------------------------users ROUTES ---------------------------------------------------------------------------------------------------------------
+    await bookingsCollection.updateOne({ _id: new ObjectId(bookingId) }, { $set: { status: 'paid' } });
+    await ticketsCollection.updateOne(
+      { _id: new ObjectId(booking.ticketId) },
+      { $inc: { quantity: -booking.bookingQuantity } }
+    );
 
-
-    // ----------------------GET ALL USERS--(Admin)--------------------
-    app.get('/api/users/admin/all',verifyJWT,verifyAdmin, async (req, res) => {
-      const result = await usersCollection.find().toArray();
-      res.send(result);
-    })
-
-
-    // ----------------------UPDATE USER ROLE-(Admin)---------------------
-    app.patch('/api/users/role/:id',verifyJWT,verifyAdmin, async (req, res) => {
-      try {
-        const { role } = req.body;
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { role } }
-        );
-        res.send(result);
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ success: false, message: 'Server error or invalid ID' });
-      }
-    });
-    //------------------------UPDATE USER isFRAUD-(Admin)---------------------
-    app.patch('/api/users/fraud/:id',verifyJWT,verifyAdmin, async (req, res) => {
-      try {
-        const { isFraud } = req.body;
-        const userId = req.params.id;
-
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(userId) },
-          { $set: { isFraud: isFraud } }
-        );
-
-        const vendor = await usersCollection.findOne({ _id: new ObjectId(userId) });
-
-        if (vendor) {
-          const targetVendorIdStr = vendor._id.toString();
-
-          await ticketsCollection.updateMany(
-            { vendorId: targetVendorIdStr },
-            { $set: { isHidden: isFraud } }
-          );
-
-
-          await bookingsCollection.updateMany(
-            { vendorId: targetVendorIdStr },
-            { $set: { isFraud: isFraud } }
-          );
-        }
-
-        res.send({ success: true, message: isFraud ? 'Marked as fraud successfully' : 'Fraud status cleared successfully' });
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ success: false, message: 'Server error' });
-      }
+    await transactionsCollection.insertOne({
+      transactionId,
+      bookingId,
+      userId: booking.userId,
+      userEmail: booking.userEmail,
+      ticketTitle: booking.ticketTitle,
+      amount,
+      paymentDate: new Date()
     });
 
-    // ------------------------------------------------------------------------------------------------------PAYMENT ROUTES ---------------------------------------------------------------------------------------------------------------
+    res.send({ success: true, message: 'Payment confirmed and updated' });
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
 
-    app.patch('/api/booking/payment-success/:id',verifyJWT,verifyUser, async (req, res) => {
-      try {
-        const bookingId = req.params.id;
-        const { transactionId, amount } = req.body;
+app.get('/api/transactions/user/:userId', verifyJWT, verifyUser, async (req, res) => {
+  try {
+    const { transactionsCollection } = getCollections();
+    const result = await transactionsCollection.find({ userId: req.params.userId }).sort({ paymentDate: -1 }).toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
 
-        const booking = await bookingsCollection.findOne({ _id: new ObjectId(bookingId) });
-        if (!booking) {
-          return res.status(404).send({ error: true, message: 'Booking not found' });
-        }
+app.get('/api/revenue/vendor/:vendorId', verifyJWT, verifyVendor, async (req, res) => {
+  try {
+    const { ticketsCollection, bookingsCollection } = getCollections();
+    const vendorId = req.params.vendorId;
 
-        if (booking.status === 'paid') {
-          return res.send({ success: true, message: 'Already processed' });
-        }
+    const totalTicketsAdded = await ticketsCollection.countDocuments({ vendorId });
+    const paidBookings = await bookingsCollection.find({ vendorId, status: 'paid' }).toArray();
+    const totalTicketsSold = paidBookings.reduce((sum, b) => sum + b.bookingQuantity, 0);
+    const totalRevenue = paidBookings.reduce((sum, b) => sum + b.totalPrice, 0);
 
-        await bookingsCollection.updateOne(
-          { _id: new ObjectId(bookingId) },
-          { $set: { status: 'paid' } }
-        );
+    res.send({ totalTicketsAdded, totalTicketsSold, totalRevenue, paidBookings });
+  } catch (error) {
+    res.status(500).send({ error: true, message: error.message });
+  }
+});
 
-        await ticketsCollection.updateOne(
-          { _id: new ObjectId(booking.ticketId) },
-          { $inc: { quantity: -booking.bookingQuantity } }
-        );
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+// Vercel এ app.listen() লাগে না - Vercel নিজেই handle করে
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(port, () => {
+    console.log(`Example app listening on port ${port}`);
+  });
+}
 
-        const transaction = {
-          transactionId,
-          bookingId,
-          userId: booking.userId,
-          userEmail: booking.userEmail,
-          ticketTitle: booking.ticketTitle,
-          amount,
-          paymentDate: new Date()
-        };
-        await transactionsCollection.insertOne(transaction);
-
-        res.send({ success: true, message: 'Payment confirmed and updated' });
-      } catch (error) {
-        res.status(500).send({ error: true, message: error.message });
-      }
-    });
-
-    // ----------------------Get User's Transaction History----------------------
-    app.get('/api/transactions/user/:userId',verifyJWT,verifyUser, async (req, res) => {
-      try {
-        const userId = req.params.userId;
-        const result = await transactionsCollection
-          .find({ userId: userId })
-          .sort({ paymentDate: -1 })
-          .toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ error: true, message: error.message });
-      }
-    });
-
-    // ----------------------Vendor Revenue Overview----------------------
-
-    app.get('/api/revenue/vendor/:vendorId',verifyJWT,verifyVendor, async (req, res) => {
-      try {
-        const vendorId = req.params.vendorId;
-
-
-        const totalTicketsAdded = await ticketsCollection.countDocuments({ vendorId });
-
-
-        const paidBookings = await bookingsCollection.find({ vendorId, status: 'paid' }).toArray();
-
-        const totalTicketsSold = paidBookings.reduce((sum, b) => sum + b.bookingQuantity, 0);
-        const totalRevenue = paidBookings.reduce((sum, b) => sum + b.totalPrice, 0);
-
-        res.send({
-          totalTicketsAdded,
-          totalTicketsSold,
-          totalRevenue,
-          paidBookings
-        });
-      } catch (error) {
-        res.status(500).send({ error: true, message: error.message });
-      }
-    });
-
-
-    // ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-    // Send a ping to confirm a successful connection
-    // await client.db("admin").command({ ping: 1 });
-//     console.log("Pinged your deployment. You successfully connected to MongoDB!");
-//   } finally {
-//     // Ensures that the client will close when you finish/error
-//     // await client.close();
-//   }
-// }
-
-
-// run().catch(console.dir);
-
-
-
-
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`)
-})
-
-module.exports = app ; 
+module.exports = app;
