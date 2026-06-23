@@ -147,6 +147,7 @@ app.get('/api/tickets/all', async (req, res) => {
 
         isHidden: { $ne: true }
       })
+      .limit(6)
       .toArray();
 
     res.send(result);
@@ -480,7 +481,7 @@ app.get('/api/tickets/latest', async (req, res) => {
     // ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
